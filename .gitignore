@@ -1,3 +1,7 @@
+DTU - Drone inspection images of wind turbine/
+DTU-annotations-main/
+models/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

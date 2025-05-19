@@ -38,6 +38,13 @@ class Trainer:
             epoch_loss = 0.0
 
             print(f"\nEpoch {epoch + 1}/{num_epochs}")
+
+            cuda_logs = torch.cuda.memory_stats(self.device)
+            print(f"CUDA Memory Allocated (Peak): {cuda_logs['allocated_bytes.all.peak'] / 1e9:.4f} GB")
+            print(f"CUDA Memory Reserved (Peak): {cuda_logs['reserved_bytes.all.peak'] / 1e9:.4f} GB")
+            print(f"CUDA Memory Allocated (Current): {cuda_logs['allocated_bytes.all.current'] / 1e9:.4f} GB")
+            print(f"CUDA Memory Reserved (Current): {cuda_logs['reserved_bytes.all.current'] / 1e9:.4f} GB")
+
             for images, targets in dataloader:
                 for target in targets:
                     array = target['boxes'].numpy()
@@ -51,13 +58,12 @@ class Trainer:
                 images = [img.to(self.device) for img in images]
                 targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
 
-                optimizer.zero_grad()
-
                 try:
                     loss_dict = self.model(images, targets)
 
                     loss = sum(loss for loss in loss_dict.values())
 
+                    optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
 
@@ -72,36 +78,18 @@ class Trainer:
 
             print(f"Epoch [{epoch + 1}/{num_epochs}] - Total Loss: {epoch_loss:.4f}")
 
-    def evaluation(self, dataloader):
+    def evaluate(self, metric, dataloader):
         self.model.eval()
-        criterion = torch.nn.CrossEntropyLoss()
-        total_loss = 0.0
-        total_correct = 0
-        total_samples = 0
 
         with torch.no_grad():
             for images, targets in dataloader:
                 images = [img.to(self.device) for img in images]
                 targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
+                
                 predictions = self.model(images)
 
-                for i, prediction in enumerate(predictions):
-                    print(f"Image {i}:")
-                    print(f"  Boxes: {prediction['boxes']}")
-                    print(f"  Labels: {prediction['labels']}")
-                    print(f"  Scores: {prediction['scores']}")
-
-                    # Calculate loss
-                    loss = criterion(prediction['scores'], targets[i]['labels'])
-                    total_loss += loss.item()
-
-                    # Calculate accuracy
-                    _, predicted_labels = torch.max(prediction['scores'], 1)
-                    total_correct += (predicted_labels == targets[i]['labels']).sum().item()
-                    total_samples += targets[i]['labels'].size(0)
-
-        avg_loss = total_loss / len(dataloader)
-        accuracy = total_correct / total_samples * 100
-
-        print(f"Average Loss: {avg_loss:.4f}")
-        print(f"Accuracy: {accuracy:.2f}%")
+                metric.update(predictions, targets)
+                
+                results = metric.compute()
+                print(f"\nmAP: {results['map']:.4f} ----------------------------\n")
+                print(f"mAP@0.5: {results['map_50']:.4f} ----------------------------\n")
