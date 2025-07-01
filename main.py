@@ -8,6 +8,9 @@ import matplotlib.patches as patches
 from trainer import Trainer
 from model import FasterRCNNModel
 from torchmetrics.detection import MeanAveragePrecision
+from datetime import datetime
+from torch.optim.lr_scheduler import ExponentialLR
+from torch.optim import Adam
 
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(17)
@@ -32,47 +35,54 @@ def plot_next_image_with_bboxes(dataloader):
 
     plt.imshow(array)
     plt.title(f"Labels: {target['labels']}, Bboxes: {target['boxes']}")
-    plt.show()
+
+    now = datetime.now()
+    plt.savefig(f"./figures/{now}_label_bbox.jpg")
 
 def plot_next_image_with_predictions(device, dataloader, model):
     val_iter = iter(dataloader)
-    val_image, val_target = next(val_iter)
-
-    val_image = [img.to(device) for img in val_image]
 
     model.eval()
-    with torch.no_grad():
-        prediction = model(val_image)
 
-    val_image_np = val_image[0].permute(1, 2, 0).cpu().numpy()
-    val_image_np = val_image_np * [0.229, 0.224, 0.225] + [0.485, 0.456, 0.406]
-    val_image_np = np.clip(val_image_np, 0, 1)
+    for _ in range(10):
+        val_image, val_target = next(val_iter)
 
-    fig, ax = plt.subplots(1)
-    ax.imshow(val_image_np)
+        val_image = [img.to(device) for img in val_image]
 
-    for box, label in zip(prediction[0]['boxes'], prediction[0]['labels']):
-        x_min, y_min, x_max, y_max = box.cpu().numpy()
-        rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, 
-                               linewidth=1, edgecolor='r', facecolor='none')
-        ax.add_patch(rect)
-        ax.text(x_min, y_min, str(label.item()), color='red', fontsize=8, 
-              bbox=dict(facecolor='white', alpha=0.7))
+        with torch.no_grad():
+            prediction = model(val_image)
 
-    for box, label in zip(val_target[0]['boxes'], val_target[0]['labels']):
-        x_min, y_min, width, height = box.cpu().numpy()
-        rect = patches.Rectangle((x_min, y_min), width, height, 
-                               linewidth=1, edgecolor='b', facecolor='none')
-        ax.add_patch(rect)
-        ax.text(x_min, y_min, str(label.item()), color='blue', fontsize=8, 
-              bbox=dict(facecolor='white', alpha=0.7))
+        val_image_np = val_image[0].permute(1, 2, 0).cpu().numpy()
+        val_image_np = val_image_np * [0.229, 0.224, 0.225] + [0.485, 0.456, 0.406]
+        val_image_np = np.clip(val_image_np, 0, 1)
 
-    plt.title("Predicted (Red) vs. Annotated (Blue) Bounding Boxes")
-    plt.axis('off')
-    plt.show()
+        fig, ax = plt.subplots(1)
+        ax.imshow(val_image_np)
+
+        for box, label in zip(prediction[0]['boxes'], prediction[0]['labels']):
+            x_min, y_min, x_max, y_max = box.cpu().numpy()
+            rect = patches.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min, 
+                                linewidth=1, edgecolor='r', facecolor='none')
+            ax.add_patch(rect)
+            ax.text(x_min, y_min, str(label.item()), color='red', fontsize=8, 
+                bbox=dict(facecolor='white', alpha=0.7))
+
+        for box, label in zip(val_target[0]['boxes'], val_target[0]['labels']):
+            x_min, y_min, width, height = box.cpu().numpy()
+            rect = patches.Rectangle((x_min, y_min), width, height, 
+                                linewidth=1, edgecolor='b', facecolor='none')
+            ax.add_patch(rect)
+            ax.text(x_min, y_min, str(label.item()), color='blue', fontsize=8, 
+                bbox=dict(facecolor='white', alpha=0.7))
+
+        plt.title("Predicted (Red) vs. Annotated (Blue) Bounding Boxes")
+        plt.axis('off')
+
+        now = datetime.now()
+        plt.savefig(f"./figures/{now}_pred_label_bbox.jpg")
 
 def main():
-    device = torch.device("cuda:1") if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
     print(f'Using {device} for inference')
 
     dataset = DTUDataset()
@@ -86,20 +96,17 @@ def main():
 
     model = FasterRCNNModel()
 
-    # if torch.cuda.device_count() > 1:
-    #     print("Using", torch.cuda.device_count(), "GPU devices")
-    #     model = nn.DataParallel(model)
-    #     model = nn.parallel.DistributedDataParallel(model)
-
     trainer = Trainer(device, model)
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.005, momentum=0.9, weight_decay=0.0005)
+    optimizer = Adam(model.parameters(), lr=0.0005, weight_decay=0.0005)
+
+    scheduler = ExponentialLR(optimizer, gamma=0.95)
 
     folder = "./models"
-    model_path = os.path.join(folder, "mask_rcnn_dtu.pth")
+    model_path = os.path.join(folder, "faster_rcnn.pth")
 
     if not os.path.exists(model_path):
-        trainer.train_model(optimizer, train_dataloader, num_epochs=50)
+        trainer.train_model(scheduler, optimizer, train_dataloader, num_epochs=50)
 
         torch.save(trainer.model.state_dict(), model_path)
 
@@ -118,7 +125,7 @@ def main():
 
     else:
         model.load_state_dict(torch.load(model_path, map_location=device))
-        
+
         print(f"Model loaded from {model_path}")
 
     val_dataloader = DataLoader(val_dataset, batch_size=8, shuffle=False, collate_fn=lambda x: tuple(zip(*x)))
@@ -127,7 +134,7 @@ def main():
 
     plot_next_image_with_predictions(device, val_dataloader, model)
 
-    trainer.evaluate(metric, val_dataloader)
+    trainer.evaluate(metric, val_dataloader, num_epochs=10)
 
 
 if __name__ == "__main__":

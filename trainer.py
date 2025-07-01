@@ -18,7 +18,7 @@ class Trainer:
         self.model = model
         self.model.to(self.device)
 
-    def train_model(self, optimizer, dataloader, num_epochs=20):
+    def train_model(self, scheduler, optimizer, dataloader, num_epochs):
         """
         Train the Mask R-CNN model with a specified dataloader and optimizer.
 
@@ -38,7 +38,9 @@ class Trainer:
             epoch_loss = 0.0
 
             print(f"\nEpoch {epoch + 1}/{num_epochs}")
-
+            learning_rate = optimizer.param_groups[0]['lr']
+            print(f'Current learning rate = {learning_rate:.6f}')
+            
             cuda_logs = torch.cuda.memory_stats(self.device)
             print(f"CUDA Memory Allocated (Peak): {cuda_logs['allocated_bytes.all.peak'] / 1e9:.4f} GB")
             print(f"CUDA Memory Reserved (Peak): {cuda_logs['reserved_bytes.all.peak'] / 1e9:.4f} GB")
@@ -46,14 +48,7 @@ class Trainer:
             print(f"CUDA Memory Reserved (Current): {cuda_logs['reserved_bytes.all.current'] / 1e9:.4f} GB")
 
             for images, targets in dataloader:
-                for target in targets:
-                    array = target['boxes'].numpy()
-                    x_min, y_min, width, height = array[0]
-                    x_max = x_min + width
-                    y_max = y_min + height
-                    target['boxes'] = torch.tensor([[
-                        x_min, y_min, x_max, y_max
-                    ]], dtype=torch.float32)
+                targets = self.xyhw2xyxy(targets)
 
                 images = [img.to(self.device) for img in images]
                 targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
@@ -76,20 +71,39 @@ class Trainer:
                     print(f"Skipping batch due to error: {e}")
                     continue
 
+            scheduler.step()
+
             print(f"Epoch [{epoch + 1}/{num_epochs}] - Total Loss: {epoch_loss:.4f}")
 
-    def evaluate(self, metric, dataloader):
+    def evaluate(self, metric, dataloader, num_epochs):
         self.model.eval()
 
-        with torch.no_grad():
-            for images, targets in dataloader:
-                images = [img.to(self.device) for img in images]
-                targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
-                
-                predictions = self.model(images)
+        for epoch in range(num_epochs):
+            with torch.no_grad():
+                for images, targets in dataloader:
+                    targets = self.xyhw2xyxy(targets)
 
-                metric.update(predictions, targets)
-                
-                results = metric.compute()
-                print(f"\nmAP: {results['map']:.4f} ----------------------------\n")
-                print(f"mAP@0.5: {results['map_50']:.4f} ----------------------------\n")
+                    images = [img.to(self.device) for img in images]
+                    targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
+                    
+                    predictions = self.model(images)
+
+                    metric.update(predictions, targets)
+
+            results = metric.compute()
+
+            print(f"\nEpoch {epoch + 1}/{num_epochs} - Evaluation Results:")
+            print(f"\nmAP: {results['map']:.4f} ----------------------------\n")
+            print(f"mAP@0.5: {results['map_50']:.4f} ----------------------------\n")
+
+    def xyhw2xyxy(self, targets):
+        for target in targets:
+            array = target['boxes'].numpy()
+            x_min, y_min, width, height = array[0]
+            x_max = x_min + width
+            y_max = y_min + height
+            target['boxes'] = torch.tensor([[
+                x_min, y_min, x_max, y_max
+            ]], dtype=torch.float32)
+        
+        return targets
