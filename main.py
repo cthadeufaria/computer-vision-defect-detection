@@ -106,7 +106,7 @@ def main():
     model_path = os.path.join(folder, "faster_rcnn.pth")
 
     if not os.path.exists(model_path):
-        trainer.train_model(scheduler, optimizer, train_dataloader, num_epochs=50)
+        trainer.train_model(scheduler, optimizer, train_dataloader, num_epochs=500)
 
         torch.save(trainer.model.state_dict(), model_path)
 
@@ -134,7 +134,7 @@ def main():
 
     plot_next_image_with_predictions(device, val_dataloader, model)
 
-    trainer.evaluate(metric, val_dataloader, num_epochs=10)
+    trainer.evaluate(metric, val_dataloader, num_epochs=50)
 
 
 if __name__ == "__main__":
