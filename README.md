@@ -59,7 +59,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 ### 3. Install Dependencies
 ```bash
-pip install torch torchvision torchmetrics matplotlib pillow pycocotools
+pip install torch torchvision torchmetrics matplotlib pillow pycocotools tensorboard
 ```
 
 ## Dataset Setup
@@ -103,6 +103,21 @@ python train_wind_turbine.py
 **Expected training time:**
 - CPU: ~30-60 min/epoch
 - CUDA GPU: ~5-10 min/epoch
+
+### Monitoring with TensorBoard
+
+Training metrics are automatically logged to TensorBoard:
+
+```bash
+tensorboard --logdir ./runs
+```
+
+Then open http://localhost:6006 in your browser to view:
+- **Loss/epoch_total**: Total loss per epoch
+- **Loss/batch_***: Individual loss components (classifier, box_reg, objectness, rpn_box_reg)
+- **Metrics/mAP**: Mean Average Precision
+- **Metrics/mAP_50**: mAP at 50% IoU threshold
+- **Learning_Rate**: Learning rate schedule
 
 ### Inference
 
@@ -183,7 +198,8 @@ computer-vision-defect-detection/
 ├── trainer.py              # Training and evaluation logic
 ├── train_wind_turbine.py   # Main training script
 ├── main.py                 # Inference script
-├── models/                 # Saved model weights
+├── models/                 # Saved model weights (versioned)
+├── runs/                   # TensorBoard logs (versioned)
 ├── figures/                # Visualization outputs
 └── missing_images.txt      # Log of missing dataset images
 ```

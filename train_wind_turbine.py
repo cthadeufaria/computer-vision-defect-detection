@@ -103,21 +103,25 @@ def main():
         num_workers=0,
     )
 
+    # Paths with versioning
+    models_folder = "./models"
+    runs_folder = "./runs"
+    os.makedirs(models_folder, exist_ok=True)
+    os.makedirs(runs_folder, exist_ok=True)
+
+    version = get_next_model_version(models_folder)
+    model_path = os.path.join(models_folder, f"faster_rcnn_wind_turbine_v{version}.pth")
+    log_dir = os.path.join(runs_folder, f"v{version}")
+
     # Initialize model with 6 classes (5 defects + background)
     model = FasterRCNNModel(num_classes=6)
-    trainer = Trainer(device, model)
+    trainer = Trainer(device, model, log_dir=log_dir)
 
     # Optimizer with lower learning rate for fine-tuning
     optimizer = Adam(model.parameters(), lr=0.0001, weight_decay=0.0005)
 
     # Learning rate scheduler
     scheduler = StepLR(optimizer, step_size=5, gamma=0.5)
-
-    # Paths with versioning
-    folder = "./models"
-    os.makedirs(folder, exist_ok=True)
-    version = get_next_model_version(folder)
-    model_path = os.path.join(folder, f"faster_rcnn_wind_turbine_v{version}.pth")
 
     # Training
     num_epochs = 30  # Recommended: 30-50 epochs for good results
@@ -138,9 +142,13 @@ def main():
     print(f"{'='*50}\n")
 
     metric = MeanAveragePrecision().to(device)
-    trainer.evaluate(metric, val_dataloader, num_epochs=1)
+    trainer.evaluate(metric, val_dataloader, num_epochs=1, log_epoch=num_epochs)
+
+    # Close TensorBoard writer
+    trainer.close()
 
     print("\nTraining complete!")
+    print(f"View metrics with: tensorboard --logdir {runs_folder}")
 
 if __name__ == "__main__":
     main()
