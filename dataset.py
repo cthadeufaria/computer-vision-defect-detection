@@ -11,7 +11,7 @@ class DTUDataset(Dataset):
         """
         Args:
             root_dir (str): Directory with all the images.
-            annotation_file (str): Path to the annotation file in COCO format (e.g., from GitHub).
+            annotation_file (str): Path to the annotation file in COCO format.
             transform (callable, optional): Optional transform to be applied on an image.
         """
         super().__init__()
@@ -28,10 +28,8 @@ class DTUDataset(Dataset):
             os.system('unzip -o hd96prn3nc-2.zip')
             os.system('rm hd96prn3nc-2.zip')
 
-        os.system('mv "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2017"/*.JPG "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/"')
-        os.system('mv "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2018"/*.JPG "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/"')
-
-        self.root_dir = "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/"
+        # Images are in Nordtank 2018 subdirectory
+        self.root_dir = "DTU - Drone inspection images of wind turbine/DTU - Drone inspection images of wind turbine/Nordtank 2018/"
         self.annotations = self.load_annotations("DTU-annotations-main/re-annotation/D3/train.json")
 
         self.transform = transforms.Compose([
@@ -40,10 +38,36 @@ class DTUDataset(Dataset):
             transforms.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 5)),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            # transforms.RandomVerticalFlip(p=0.5),
-            # transforms.RandomRotation(degrees=45),
-            # transforms.RandomHorizontalFlip(p=0.5),
         ])
+
+        # Validate images and filter out missing ones
+        self.valid_indices, self.missing_images = self._validate_images()
+        print(f"Valid images: {len(self.valid_indices)}, Missing images: {len(self.missing_images)}")
+
+        # Save missing images to file
+        if self.missing_images:
+            with open("missing_images.txt", "w") as f:
+                for img_name in self.missing_images:
+                    f.write(f"{img_name}\n")
+            print(f"Missing images saved to missing_images.txt")
+
+    def _validate_images(self):
+        """Check which images exist and return valid indices and missing image names."""
+        valid_indices = []
+        missing_images = []
+
+        for idx, img_info in enumerate(self.annotations['images']):
+            # Extract base image name from sliced filename (e.g., DJI_0168_1_2.JPG -> DJI_0168.JPG)
+            file_name = img_info['file_name']
+            base_name = file_name.split('.')[0][:-4] + '.JPG'  # Remove _X_X suffix
+            base_path = os.path.join(self.root_dir, base_name)
+
+            if os.path.exists(base_path):
+                valid_indices.append(idx)
+            else:
+                missing_images.append(f"{file_name} (base: {base_name})")
+
+        return valid_indices, missing_images
 
     def load_annotations(self, annotation_file):
         with open(annotation_file, 'r') as f:
@@ -71,22 +95,33 @@ class DTUDataset(Dataset):
             return None
 
     def __len__(self):
-        return len(self.annotations['images'])
+        # Return only valid images count
+        return len(self.valid_indices)
 
     def __getitem__(self, idx):
-        img_info = self.annotations['images'][idx]
+        # Map to valid index
+        actual_idx = self.valid_indices[idx]
+        img_info = self.annotations['images'][actual_idx]
         img_path = os.path.join(self.root_dir, img_info['file_name'])
         slc = self.slice_image(img_path)
+
+        if slc is None:
+            raise RuntimeError(f"Failed to load image: {img_path}")
 
         if self.transform:
             image = self.transform(slc)
 
         ann_ids = [ann for ann in self.annotations['annotations'] if ann['image_id'] == img_info['id']]
         boxes = [ann['bbox'] for ann in ann_ids]
-        labels = [ann['category_id'] for ann in ann_ids]
+        # Shift labels by 1 since Faster R-CNN reserves 0 for background
+        labels = [ann['category_id'] + 1 for ann in ann_ids]
 
-        boxes = torch.tensor(boxes, dtype=torch.float32)
-        labels = torch.tensor(labels, dtype=torch.int64)
+        if len(boxes) == 0:
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            labels = torch.zeros((0,), dtype=torch.int64)
+        else:
+            boxes = torch.tensor(boxes, dtype=torch.float32)
+            labels = torch.tensor(labels, dtype=torch.int64)
 
         target = {
             'boxes': boxes,

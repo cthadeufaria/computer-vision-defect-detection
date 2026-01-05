@@ -40,12 +40,12 @@ class Trainer:
             print(f"\nEpoch {epoch + 1}/{num_epochs}")
             learning_rate = optimizer.param_groups[0]['lr']
             print(f'Current learning rate = {learning_rate:.6f}')
-            
-            cuda_logs = torch.cuda.memory_stats(self.device)
-            print(f"CUDA Memory Allocated (Peak): {cuda_logs['allocated_bytes.all.peak'] / 1e9:.4f} GB")
-            print(f"CUDA Memory Reserved (Peak): {cuda_logs['reserved_bytes.all.peak'] / 1e9:.4f} GB")
-            print(f"CUDA Memory Allocated (Current): {cuda_logs['allocated_bytes.all.current'] / 1e9:.4f} GB")
-            print(f"CUDA Memory Reserved (Current): {cuda_logs['reserved_bytes.all.current'] / 1e9:.4f} GB")
+
+            # Only log CUDA memory if available
+            if torch.cuda.is_available() and self.device.type == 'cuda':
+                cuda_logs = torch.cuda.memory_stats(self.device)
+                print(f"CUDA Memory Allocated (Peak): {cuda_logs['allocated_bytes.all.peak'] / 1e9:.4f} GB")
+                print(f"CUDA Memory Reserved (Peak): {cuda_logs['reserved_bytes.all.peak'] / 1e9:.4f} GB")
 
             for images, targets in dataloader:
                 targets = self.xyhw2xyxy(targets)
@@ -97,13 +97,18 @@ class Trainer:
             print(f"mAP@0.5: {results['map_50']:.4f} ----------------------------\n")
 
     def xyhw2xyxy(self, targets):
+        """Convert bounding boxes from [x, y, width, height] to [x_min, y_min, x_max, y_max]"""
         for target in targets:
-            array = target['boxes'].numpy()
-            x_min, y_min, width, height = array[0]
-            x_max = x_min + width
-            y_max = y_min + height
-            target['boxes'] = torch.tensor([[
-                x_min, y_min, x_max, y_max
-            ]], dtype=torch.float32)
-        
+            boxes = target['boxes'].numpy()
+            if len(boxes) == 0:
+                target['boxes'] = torch.zeros((0, 4), dtype=torch.float32)
+                continue
+            converted_boxes = []
+            for box in boxes:
+                x_min, y_min, width, height = box
+                x_max = x_min + width
+                y_max = y_min + height
+                converted_boxes.append([x_min, y_min, x_max, y_max])
+            target['boxes'] = torch.tensor(converted_boxes, dtype=torch.float32)
+
         return targets
